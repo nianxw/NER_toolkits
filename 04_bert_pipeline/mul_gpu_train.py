@@ -122,6 +122,16 @@ def main():
         logging.info("Start training !")
         train_helper_mul_gpu.train(bert_tokenizer, bert_config, args, train_dataset)
 
+    if args.do_predict:
+        logging.info("Start predicting !")
+        ner_model = Basic_model.ner.from_pretrained(args.load_path)
+        logging.info("Checkpoint: %s have been loaded!" % (args.load_path))
+
+        if args.use_cuda:
+            ner_model.cuda()
+
+        predict_res = train_helper_mul_gpu.predict(args, bert_tokenizer, ner_model)
+
 
 
 if __name__ == "__main__":

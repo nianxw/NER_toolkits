@@ -179,22 +179,19 @@ def train(tokenizer, config, args, train_data_set):
             tokenizer.save_vocabulary(output_dir)
 
 
-def predict(args, tokenizer, model_list):
-    bert_model, span_model, type_model = model_list
-    bert_model.eval()
-    span_model.eval()
-    type_model.eval()
+def predict(args, tokenizer, model):
+    model.eval()
     save_path = '/'.join(args.load_path.split('/')[:-1])
     output = open(os.path.join(save_path, args.predict_path.split('/')[-1] + '.res'), 'w', encoding='utf8')
 
     predict_res = defaultdict(list)
+    bert_model, span_model, type_model = model.bert, model.span_m, model.type_m
     with torch.no_grad():
         with open(args.predict_path, 'r', encoding='utf8') as f:
             for line in tqdm(f):
                 line = json.loads(line.strip())
                 text_id = line['nid']
                 sentence = line['text']
-                app_id = line.get('app_id', '123')
                 tokens = tokenizer.tokenize(sentence)
                 if len(tokens) > args.max_seq_len - 2:
                     tokens = tokens[: args.max_seq_len - 2]
@@ -215,27 +212,26 @@ def predict(args, tokenizer, model_list):
                 left_pos, right_pos = np.where(left_logits[0] > 0.5)[0], np.where(right_logits[0] > 0.5)[0]  # 返回的是索引
                 start_pos, end_pos = util.binary_decode2(left_pos, right_pos)
 
+                if start_pos:
+                    start_pos = torch.tensor(np.array([[_ for _ in start_pos]]), device=input_ids.device)
+                    end_pos = torch.tensor(np.array([[_ for _ in end_pos]]), device=input_ids.device)
+                    _, entity_type_probs = type_model(encoder_output=encoder_output,
+                                                      s_pos=start_pos,
+                                                      e_pos=end_pos)
+                    _, type_preds = torch.max(entity_type_probs, -1)
+                    type_preds = type_preds.cpu().tolist()[0]
+                    start_pos_cpu = start_pos.data.cpu().tolist()[0]
+                    end_pos_cpu = end_pos.data.cpu().tolist()[0]
 
-                # if start_pos:
-                #     start_pos = torch.tensor(np.array([[_ for _ in start_pos]]), device=input_ids.device)
-                #     end_pos = torch.tensor(np.array([[_ for _ in end_pos]]), device=input_ids.device)
-                #     _, entity_type_probs = type_model(encoder_output=encoder_output,
-                #                                       s_pos=start_pos,
-                #                                       e_pos=end_pos)
-                #     _, type_preds = torch.max(entity_type_probs, -1)
-                #     type_preds = type_preds.cpu().tolist()[0]
-                #     start_pos_cpu = start_pos.data.cpu().tolist()[0]
-                #     end_pos_cpu = end_pos.data.cpu().tolist()[0]
+                    for s, e, t in zip(start_pos_cpu, end_pos_cpu, type_preds):
+                        predict_res[text_id].append([s-1, e, t])
 
-                #     for s, e, t in zip(start_pos_cpu, end_pos_cpu, type_preds):
-                #         predict_res[text_id].append([s-1, e, t])
-
-                #     pred_label = []
-                #     for s, e, t in zip(start_pos_cpu, end_pos_cpu, type_preds):
-                #         span_type = args.id2type[t]
-                #         span_text = sentence[s-1: e]
-                #         pred_label.append([s-1, e, span_type, span_text])
-                #     line['label'] = pred_label
+                    pred_label = []
+                    for s, e, t in zip(start_pos_cpu, end_pos_cpu, type_preds):
+                        span_type = args.id2type[t]
+                        span_text = sentence[s-1: e]
+                        pred_label.append([s-1, e, span_type, span_text])
+                    line['label'] = pred_label
 
                 # if cate_score >= 0.5:
                 # if cate_score >= 0.5:
